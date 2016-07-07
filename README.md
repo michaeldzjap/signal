@@ -1,7 +1,9 @@
-# CZT
-Chirp z-transform implementation for SuperCollider
+# signal
+Port of some MATLAB functions from the signal toolbox to SuperCollider
 
-## Example
+## Examples
+
+### Chirp z-transform
 ```
 // Make a test signal
 l = 73;
