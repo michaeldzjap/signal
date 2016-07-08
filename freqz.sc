@@ -17,7 +17,7 @@
 	 *
 	 * NOTE: this is a SC port of MATLAB's freqz function
 	 */
-	freqz { arg n = 512, fs = nil, w = nil, range = \onesided;
+	freqz { arg n = 512, fs = nil, w = nil, range = \onesided, plot = true;
 		var nargin, fvflag = false, centerdc = false, b, a, h;
 
 		(this.shape.size == 2 and: { this.shape[0] == 2 }).if {
@@ -48,6 +48,10 @@
 		} {
 			#h, w = this.prIIRFreqz(b, a, w, fs, n, fvflag, range);
 		};
+
+		plot.if {
+			[h, w].prFreqzPlot();
+		}
 
 		^[h, w]
 	}
@@ -180,6 +184,9 @@
 		);
 
 		^w
+	}
+
+	prFreqzPlot {
 	}
 
 }

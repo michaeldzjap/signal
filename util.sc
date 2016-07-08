@@ -43,6 +43,18 @@
 		}
 	}
 
+	// Simple 1D in place phase unwrapping
+	unwrap {
+		(this.size - 1) do: { |i|
+			var ip = i + 1, dp, dpo;
+			dp = this[ip] - this[i];
+			dpo = dp/2pi;
+			((dpo%1).abs <= 0.5).if { dpo = dpo.floor }; // so that a + 0.5 rounds to a, not a + 1
+			dpo = dpo.round;
+			this[ip] = this[ip] - (2pi*dpo);
+		}
+	}
+
 }
 
 + Symbol {
