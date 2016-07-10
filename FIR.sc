@@ -13,12 +13,12 @@
 
 FIR {
 
-	*parksMcClellan { arg order, freqs, amps, wtx, ftype, lgrid;
+	*parksMcClellan { arg order, freqs, amps, wtx, ftype, lgrid, impType = 0;
 		var nfilt, grid, des, wt, signVal, hilbert, neg, h, err, iext;
 
 		#nfilt, freqs, grid, des, wt, ftype, signVal, hilbert, neg = FIR.prInit(order, freqs, amps, wtx, ftype, lgrid);
 
-		#h, err, iext = FIR.prRemez(nfilt, freqs/2, grid/2, des, wt, neg);
+		#h, err, iext = FIR.prRemez(nfilt, freqs/2, grid/2, des, wt, neg, impType);
 
 		err = err.abs;
 		h = h ++ ((0.5 - neg).sign*h[h.lastIndex - (nfilt%2)..0]);
@@ -203,7 +203,7 @@ FIR {
 		^grid
 	}
 
-	*prRemez { arg nfilt, edge, grid, des, wt, neg;
+	*prRemez { arg nfilt, edge, grid, des, wt, neg, impType;
 		var nbands, jb, nodd, nfcns, ngrid, temp, j, iext, nz, x, y, ad, dev, nm1, fsh, cn, delf, l, kkk, a, aa, bb, dden, alpha, h;
 
 		nbands = edge.size/2;
@@ -233,7 +233,7 @@ FIR {
 		iext = floor(temp*j ++ [ngrid - 1]);
 		nz = nfcns + 1;
 
-		#x, y, ad, dev = FIR.prRemezImp1(nz, iext, ngrid, grid, des, wt);
+		#x, y, ad, dev = (impType == 0).if { FIR.prRemezImp1(nz, iext, ngrid, grid, des, wt) } { FIR.prRemezImp2(nz, iext, ngrid, grid, des, wt) };
 
 		// Inverse Fourier transformation
 		nm1 = nfcns - 1;
@@ -345,6 +345,45 @@ FIR {
 		^[h, dev, iext]
 	}
 
+	*prGenWeightedError { arg nz, ngrid, grid, des, wt, l_trial;
+		var x, y, a, ad = 1!nz, dev, add = 1!nz, dnum = 0, dden = 0, x_all, err_num, err_den, err_cy, wei_err, dev_vect;
+
+		/**
+		 * Step I: based on the present 'trial' vector l_trial, generate the
+		 * weighted error function wei_err(k) at all the grid points.
+		 */
+		x = cos(2pi*(grid|@|l_trial));   // step 1: Lagrange abscissa vector x
+		a = Matrix.withFlatArray(x.size, 1, x)*Matrix.withFlatArray(1, nz, 1!nz) - (Matrix.withFlatArray(nz, 1, 1!nz)*Matrix.withFlatArray(1, x.size, x));
+		nz do: { |k|
+			a[k, k] = 1.0;
+			a.doCol(k, { |entree| ad[k] = ad[k]*entree });
+		};
+		ad = ad*((-2)**(nz - 1));  // step 1: Lagrange coefficient vector ad...
+		ad = ad.reciprocal;        // found efficiently without using the function remezdd
+		nz.div(2) do: { |i| add[i*2 + 1] = -1 };
+		ad.size do: { |i| dnum = dnum + (ad[i]*(des|@|l_trial)[i]) };
+		add.size do: { |i| dden = dden + (add[i]*(ad/(wt|@|l_trial))[i]) };
+		dev = dnum.neg/dden;   // step 1: current value of deviation
+		// step 2: Lagrange ordinate vector y
+		y = des|@|l_trial + (dev*add/(wt|@|l_trial));
+		// step 3: overall obscissa vector x_all
+		x_all = cos(2pi*grid[0..ngrid - 1]);
+		err_num = 0!ngrid;    // step 4: initialisaztion of err_num + err_den
+		err_den = 0!ngrid;
+		nz do: { |jj|         // step 5 and 6: intermediate evaluations for...
+			var aid = ad[jj]/(x_all - x[jj]);   // obtaining the weighted error...
+			err_den = err_den + aid;            // wei_err[k] at all the grid points.
+			err_num = err_num + (y[jj]*aid);
+		};
+		err_cy = err_num/err_den;
+		wei_err = (err_cy - des)*wt;                      // step 7: generate the vector wei_err
+		dev_vect = 1!l_trial.size;
+		l_trial.size.div(2) do: { |i| dev_vect[i*2 + 1] = dev_vect[i*2 + 1].neg };
+		dev_vect = dev_vect*dev;                           // entries of wei_err at l_trial[0:nz - 1]...
+		l_trial do: { |lt, i| wei_err[lt] = dev_vect[i] }; // by using the values of dev (-dev).
+		^[wei_err, dev_vect, l_trial, x, y, ad, dev]
+	}
+
 	*prRemezImp1 { arg nz, iext, ngrid, grid, des, wt;
 		var niter, itrmax, l_trial, a, x, y, ad, dev;
 
@@ -357,44 +396,12 @@ FIR {
 		// Remez loop for locating desired nz indices among the grid points
 		block { |break|
 			while({ niter < itrmax }) {
-				var add = 1!nz, dnum = 0, dden = 0, x_all, err_num, err_den, err_cy, wei_err, dev_vect, l_real=nil!nz, err_vic = 0!nz, endsearch, err_end = 0!nz, l_end_real = 0!nz;
+				var /*add = 1!nz, dnum = 0, dden = 0, x_all, err_num, err_den, err_cy,*/ wei_err, dev_vect, l_real=nil!nz, err_vic = 0!nz, endsearch, err_end = 0!nz, l_end_real = 0!nz;
 				ad = 1!nz;
 
-				/**
-				* Segment 1: based on the present 'trial' vector l_trial, generate the
-				* weighted error function wei_err(k) at all the grid points.
-				*/
-				x = cos(2pi*(grid|@|l_trial));   // step 1: Lagrange abscissa vector x
-				a = Matrix.withFlatArray(x.size, 1, x)*Matrix.withFlatArray(1, nz, 1!nz) - (Matrix.withFlatArray(nz, 1, 1!nz)*Matrix.withFlatArray(1, x.size, x));
-				nz do: { |k|
-					a[k, k] = 1.0;
-					a.doCol(k, { |entree| ad[k] = ad[k]*entree });
-				};
-				ad = ad*((-2)**(nz - 1));  // step 1: Lagrange coefficient vector ad...
-				ad = ad.reciprocal;        // found efficiently without using the function remezdd
-				nz.div(2) do: { |i| add[i*2 + 1] = -1 };
-				ad.size do: { |i| dnum = dnum + (ad[i]*(des|@|l_trial)[i]) };
-				add.size do: { |i| dden = dden + (add[i]*(ad/(wt|@|l_trial))[i]) };
-				dev = dnum.neg/dden;   // step 1: current value of deviation
-				// step 2: Lagrange ordinate vector y
-				y = des|@|l_trial + (dev*add/(wt|@|l_trial));
-				// step 3: overall obscissa vector x_all
-				x_all = cos(2pi*grid[0..ngrid - 1]);
-				err_num = 0!ngrid;    // step 4: initialisaztion of err_num + err_den
-				err_den = 0!ngrid;
-				nz do: { |jj|         // step 5 and 6: intermediate evaluations for...
-					var aid = ad[jj]/(x_all - x[jj]);   // obtaining the weighted error...
-					err_den = err_den + aid;            // wei_err[k] at all the grid points.
-					err_num = err_num + (y[jj]*aid);
-				};
-				err_cy = err_num/err_den;
-				wei_err = (err_cy - des)*wt;                      // step 7: generate the vector wei_err
-				dev_vect = 1!l_trial.size;
-				l_trial.size.div(2) do: { |i| dev_vect[i*2 + 1] = dev_vect[i*2 + 1].neg };
-				dev_vect = dev_vect*dev;                           // entries of wei_err at l_trial[0:nz - 1]...
-				l_trial do: { |lt, i| wei_err[lt] = dev_vect[i] }; // by using the values of dev (-dev).
+				#wei_err, dev_vect, l_trial, x, y, ad, dev = FIR.prGenWeightedError(nz, ngrid, grid, des, wt, l_trial);
 
-				// Segment 2: perform vicinity search
+				// Step II: perform vicinity search
 				nz do: { |k|   // steps 1, 2 and 3: start of vicinity search
 					var ind_vicinity, err_vicinity, low;
 					(k == 0).if {
@@ -417,7 +424,7 @@ FIR {
 					}
 				};
 
-				// Segment 3: perform endpoint search
+				// Step III: perform endpoint search
 				endsearch = 0;    // step 1: start endpoint search
 				err_end[0] = 0;   // step 2: needed for the case, where upp_end = 0
 				(l_real[0] > 1 and: { l_trial[0] > 1 }).if {   // step 2: find l_end_true[0]...
@@ -456,6 +463,72 @@ FIR {
 				}
 			}
 		};
+		^[x, y, ad, dev]
+	}
+
+	*prRemezImp2 { arg nz, iext, ngrid, grid, des, wt;
+		var niter, itrmax, l_trial, a, x, y, ad, dev;
+
+		// Initialisation phase
+		niter = 1;                  // Initialise the iteration counter
+		itrmax = 250;               // Maximum number of iterations
+		l_trial = iext[0..nz - 1];  // Startup value of l_trial
+
+		// Iteration phase
+		// Remez loop for locating desired nz indices among the grid points
+		block{ |break|
+			while({ niter < itrmax }) {
+				var wei_err, dev_vect, l_aid1, l_aid2, ind, rowInds, colInds, weiErrAbs, l_real_start, l_real_init, wei_real, wei_comp, l_real;
+
+				#wei_err, dev_vect, l_trial, x, y, ad, dev = FIR.prGenWeightedError(nz, ngrid, grid, des, wt, l_trial);
+
+				// Step II: determine the vector l_real_start
+				// step 1: find l_aid1
+				l_aid1 = (wei_err ++ [0]).differentiate.sign.differentiate;
+				l_aid1.removeAt(0);
+				l_aid1 = l_aid1 selectIndices: { |item| item != 0 };
+				// step 2: determine l_aid2
+				l_aid2 = l_aid1|@|((wei_err|@|l_aid1).abs selectIndices: { |item| item >= dev.abs });
+				// step 3: this is not ideal, but no sparse matrix support in SC
+				rowInds = (0..l_aid2.lastIndex);
+				colInds = ([1] ++ ([(wei_err|@|(l_aid2[1..l_aid2.lastIndex])) >= 0,(wei_err|@|(l_aid2[0..l_aid2.lastIndex - 1])) >= 0].flop collect: { |item| item[0] != item[1] }).asInteger).integrate - 1;
+				ind = Matrix.fill(rowInds.maxItem + 1, colInds.maxItem + 1, { 0 });
+				weiErrAbs = (wei_err|@|l_aid2).abs;
+				l_aid2.size do: { |i| ind.put(rowInds[i], colInds[i], weiErrAbs[i]) };
+				ind = ind.cols collect: { |i| ind.getCol(i).maxIndex }; // retrieve index of max item per col
+				// step 4: determine l_real_start
+				l_real_start = l_aid2|@|ind;
+
+				// Step III: determine the vector l_real
+				l_real_init = l_real_start;   // step 1
+				((l_real_init.size - nz)%2 == 1).if {   // step 2: odd difference
+					(wei_err[l_real_init.first].abs <= wei_err[l_real_init.last].abs).if {
+						l_real_init.removeAt(0);   // step 3: discard the first entry...
+					} {   // of l_real_init
+						l_real_init.removeAt(l_real_init.lastIndex);   // otherwise discard the last entry
+					}
+				};
+				while({ l_real_init.size > nz }) {   // step 4
+					wei_real = (wei_err|@|l_real_init).abs;    // start of step 5
+					wei_comp = (wei_real.size - 1) collect: { |i| wei_real[i].max(wei_real[i + 1]) }; // end of step 5
+					(wei_err[l_real_init.first].abs.max(wei_err[l_real_init.last].abs) <= wei_comp.minItem).if {  // start of step 6
+						l_real_init = l_real_init[1..l_real_init.lastIndex - 1];   // end of step 6
+					} {
+						var ind_omit = wei_comp.minIndex;   // start: step 7
+						2 do: { l_real_init.removeAt(ind_omit) };
+					}
+				};
+				l_real = l_real_init;
+
+				// Step IV: test convergence
+				(l_real every: { |lr, i| lr == l_trial[i] }).if {
+					break.value;  // step 1: The real and trial vectors coincide. Hence stop. Remez loop ended successfully
+				} {
+					l_trial = l_real;   // step 2: Otherwise, replace the values of l_trial with the values of l_real and continue
+					niter = niter + 1;
+				}
+			}
+		}
 		^[x, y, ad, dev]
 	}
 
