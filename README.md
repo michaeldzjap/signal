@@ -49,3 +49,35 @@ var n, f, a, w, h, err, p;
 p = [h.abs.ampdb, h.phase.unwrap].lace(h.size*2).plot("Frequency response H(z)", Rect(0, 0, 800, 400), numChannels: 2);
 )
 ```
+
+```
+/**
+ * Example of an L-th band (Nyquist) lowpass FIR filter that can be used for 4x
+ * oversampling (L = 4 in this case). Note how every 4-th coefficient is 0 so
+ * that every 4-th tap of a polyphase implementation is just the original input
+ * to the filter.
+ *
+ * The frequency range [0 - 1] for FIR.parksMcClellan corresponds to the range
+ * [0 - fs / 2] Hz (or equivalently, [0 - pi] radians).
+ *
+ * The filter length for an L-th band FIR has to be uneven (hence n needs to be
+ * even).
+ */
+(
+var n = 510, f = [0, 0.24, 0.26, 1], a = [1, 1, 0, 0], w = [1, 10], h, hf, hr, err, p;
+
+// compute FIR filter using Parks/McClellan design algorithm
+#h, err = FIR.parksMcClellan(n, f, a, w);
+#hf, w = h.freqz(n: 300);
+
+// plot magnitude and phase response
+p = [hf.abs.max(1e-06).ampdb, hf.phase.unwrap].lace(hf.size * 2).plot("Frequency response H(z)", Rect(0, 0, 800, 400), numChannels: 2);
+p.plots[0].domainSpec = [0, 0.5].asSpec; // 0 - fs / 2
+p.plots[1].domainSpec = [0, 1].asSpec;
+p.refresh;
+
+q = h[n.div(2.5)..h.lastIndex - n.div(2.5)].plot("Impulse response h(n)", Rect(0, 500, 800, 300), true);
+q.domainSpecs = [0, n - n.div(2.5) - n.div(2.5)].asSpec;
+q.refresh;
+)
+```
