@@ -97,8 +97,8 @@ p = [h.abs.ampdb, h.phase.unwrap].lace(h.size*2).plot("Frequency response H(z)",
 /**
  * Example of an L-th band (Nyquist) lowpass FIR filter that can be used for 4x
  * oversampling (L = 4 in this case). Note how every 4-th coefficient is 0 so
- * that every 4-th tap of a polyphase implementation is redundant.
- *
+ * that every 4-th tap of a polyphase implementation basically reduces from a
+ * convolution operation to a simple scaling of the relevant input sample.
  * The frequency range [0 - 1] for FIR.parksMcClellan corresponds to the range
  * [0 - fs / 2] Hz (or equivalently, [0 - pi] radians).
  *
